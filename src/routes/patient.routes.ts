@@ -32,6 +32,27 @@ router.get(
     patientController.getTodaysReturningPatients
 );
 
+// --- DOCTOR SCHEDULE ROUTES ---
+router.get(
+    '/doctor-schedule/:doctorId',
+    authenticateToken,
+    authorizeRoles(['owner', 'staff', 'doctor']),
+    patientController.getDoctorSchedule
+);
+router.get(
+    '/doctor-schedule',
+    authenticateToken,
+    authorizeRoles(['owner', 'staff']),
+    patientController.getAllPatientsForScheduling
+);
+router.put(
+    '/:patientId/assign-doctor',
+    authenticateToken,
+    authorizeRoles(['owner', 'staff']),
+    patientController.assignDoctor
+);
+
+
 // GET / - Get all patients.
 // Nurses can see all patients (data is filtered in the controller).
 router.get('/', authenticateToken, authorizeRoles(['owner', 'staff', 'nurse', 'doctor']), patientController.getAllPatients);
@@ -54,12 +75,20 @@ router.post(
     patientController.scheduleNextAppointment
 );
 
-// NEW ROUTE: POST /:patientId/send-reminder - Send an appointment reminder email.
+// POST /:patientId/send-reminder - Send a generic appointment reminder email.
 router.post(
     '/:patientId/send-reminder',
     authenticateToken,
     authorizeRoles(['owner', 'staff', 'doctor','nurse']),
     patientController.sendAppointmentReminder
+);
+
+// NEW ROUTE: POST /:patientId/reminders/:type - Send a procedure-specific reminder.
+router.post(
+    '/:patientId/reminders/:type',
+    authenticateToken,
+    authorizeRoles(['owner', 'staff', 'doctor', 'nurse']),
+    patientController.sendProcedureSpecificReminder
 );
 
 

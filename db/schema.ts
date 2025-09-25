@@ -76,6 +76,8 @@ export const dentalRecords = mysqlTable("dental_records", {
         .references(() => patients.id, { onDelete: 'cascade' }),
     doctorId: int("doctor_id")
         .references(() => users.id, { onDelete: 'set null' }),
+    receptionistId: int("receptionist_id")
+        .references(() => users.id, { onDelete: 'set null' }),
     complaint: text("complaint"),
     historyOfPresentComplaint: text("history_of_present_complaint"),
     pastDentalHistory: text("past_dental_history"),
@@ -119,6 +121,12 @@ export const dentalRecordRelations = relations(dentalRecords, ({ one }) => ({
     doctor: one(users, {
         fields: [dentalRecords.doctorId],
         references: [users.id],
+        relationName: 'doctor_records'
+    }),
+    receptionist: one(users, {
+        fields: [dentalRecords.receptionistId],
+        references: [users.id],
+        relationName: 'receptionist_records'
     }),
 }));
 
@@ -167,3 +175,22 @@ export const inventoryTransactionRelations = relations(inventoryTransactions, ({
         references: [users.id],
     }),
 }));
+
+export const settings = mysqlTable("settings", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 255 }).unique().notNull(),
+  config: json("config").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
+});
+
+export const serviceItems = mysqlTable("service_items", {
+    id: serial("id").primaryKey(),
+    name: varchar("name", { length: 255 }).notNull().unique(),
+    price: decimal("price", { precision: 10, scale: 2 }).notNull(),
+});
+
+export const hmoProviders = mysqlTable("hmo_providers", {
+    id: serial("id").primaryKey(),
+    name: varchar("name", { length: 255 }).notNull().unique(),
+});

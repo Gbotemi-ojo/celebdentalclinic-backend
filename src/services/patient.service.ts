@@ -1,13 +1,21 @@
 // src/services/patient.service.ts
-import { eq, ne, and, desc, isNull, gte, sql } from 'drizzle-orm';
+import { eq, ne, and, desc, isNull, gte, sql, or } from 'drizzle-orm';
 import { db } from '../config/database';
 import { patients, dentalRecords, users, dailyVisits } from '../../db/schema';
 import { InferInsertModel, InferSelectModel } from 'drizzle-orm';
 import { googleSheetsService } from './googleSheets.service';
 import { emailService } from './email.service';
 
+// --- TYPE DEFINITIONS ---
+
 type PatientInsert = InferInsertModel<typeof patients>;
 type PatientSelect = InferSelectModel<typeof patients>;
+type DentalRecordInsert = InferInsertModel<typeof dentalRecords>;
+
+interface AuthenticatedUser {
+    userId: number;
+    role: string;
+}
 
 interface NewFamilyHeadData {
     name: string;
@@ -29,12 +37,65 @@ interface NewGuestFamilyData extends NewFamilyHeadData {
     members: NewFamilyMemberData[];
 }
 
-type DentalRecordInsert = InferInsertModel<typeof dentalRecords>;
+// --- HELPER FUNCTIONS ---
+
+/**
+ * Checks if a user has permission to see contact details based on settings.
+ * @param user The authenticated user object.
+ * @param settings The application settings object.
+ * @returns {boolean} True if the user has permission, false otherwise.
+ */
+const canUserSeeContactDetails = (user: AuthenticatedUser | undefined, settings: any): boolean => {
+    // If there's no user context, they can't see the details.
+    if (!user) {
+        return false;
+    }
+
+    // Now TypeScript knows 'user' is defined for all subsequent checks.
+    // The 'owner' role always has access.
+    if (user.role === 'owner') {
+        return true;
+    }
+
+    // Check for valid settings and the specific permission array's existence.
+    if (!settings || !settings.patientManagement || !settings.patientManagement['canSeeContactDetails']) {
+        return false;
+    }
+
+    // Finally, check if the user's role is in the permissions list.
+    return settings.patientManagement['canSeeContactDetails'].includes(user.role);
+};
+
+/**
+ * Strips sensitive contact info from a patient object and its nested relatives.
+ * @param patient The patient object to sanitize.
+ * @returns A new patient object without contact details, or null.
+ */
+const stripContactInfo = (patient: any): any | null => {
+    if (!patient) return null;
+    const { phoneNumber, email, address, ...safePatientData } = patient;
+    const safePatient: any = { ...safePatientData };
+
+    if (safePatient.familyHead) {
+        const { phoneNumber: headPhone, email: headEmail, address: headAddress, ...safeHead } = safePatient.familyHead;
+        safePatient.familyHead = safeHead;
+    }
+
+    if (safePatient.familyMembers) {
+        safePatient.familyMembers = safePatient.familyMembers.map((member: any) => {
+            const { phoneNumber: memberPhone, email: memberEmail, address: memberAddress, ...safeMember } = member;
+            return safeMember;
+        });
+    }
+    return safePatient;
+};
+
 
 export class PatientService {
-    constructor() {}
-
-    async addGuestPatient(patientData: NewFamilyHeadData, sendReceipt: boolean = true) {
+  constructor() {}
+  
+  // ... (addGuestPatient, addFamilyMember, etc. - all other methods remain the same) ...
+  async addGuestPatient(patientData: NewFamilyHeadData, sendReceipt: boolean = true): Promise<PatientSelect> {
         const { name, sex, dateOfBirth, phoneNumber, email, address, hmo } = patientData;
         const existingPatient = await db.select().from(patients).where(eq(patients.phoneNumber, phoneNumber)).limit(1);
         if (existingPatient.length > 0) {
@@ -93,7 +154,7 @@ export class PatientService {
         return newPatient;
     }
 
-    async addFamilyMember(headId: number, memberData: NewFamilyMemberData) {
+    async addFamilyMember(headId: number, memberData: NewFamilyMemberData): Promise<PatientSelect> {
         const [familyHead] = await db.query.patients.findMany({
             where: and(eq(patients.id, headId), eq(patients.isFamilyHead, true)),
             limit: 1,
@@ -173,13 +234,11 @@ export class PatientService {
         
         const now = new Date();
 
-        // 1. PRESERVED NEW FEATURE: This logs the returning patient's visit to the database.
         await db.insert(dailyVisits).values({
             patientId: patient.id,
             checkInTime: now,
         });
 
-        // 2. RESTORED OLD FEATURE: This sends the email notification for the returning patient.
         this._sendReturningPatientNotifications(patient, now);
 
         return { 
@@ -188,8 +247,8 @@ export class PatientService {
             visitDate: now.toISOString().split('T')[0] 
         };
     }
-    
-    async getTodaysReturningPatients() {
+
+    async getTodaysReturningPatients(user?: AuthenticatedUser, settings?: any) {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
 
@@ -205,6 +264,7 @@ export class PatientService {
                 nextAppointmentDate: patients.nextAppointmentDate,
                 phoneNumber: patients.phoneNumber,
                 email: patients.email,
+                address: patients.address
             }
         })
         .from(dailyVisits)
@@ -212,36 +272,57 @@ export class PatientService {
         .where(gte(dailyVisits.checkInTime, today))
         .orderBy(desc(dailyVisits.checkInTime));
         
-        return todaysVisits;
+        const shouldSeeContact = canUserSeeContactDetails(user, settings);
+        if (shouldSeeContact) {
+            return todaysVisits;
+        }
+
+        return todaysVisits.map(visit => {
+            if (visit.patient) {
+                const { phoneNumber, email, address, ...safePatient } = visit.patient;
+                return { ...visit, patient: safePatient };
+            }
+            return visit;
+        });
     }
 
-
-    async getAllPatients() {
-        const allPatients = await db.query.patients.findMany({
+    async getAllPatients(user?: AuthenticatedUser, settings?: any) {
+        const allPatientsData = await db.query.patients.findMany({
             with: {
                 familyHead: true,
                 familyMembers: true,
                 dentalRecords: {
                     orderBy: [desc(dentalRecords.createdAt)],
-                    limit: 1
+                    limit: 1,
+                    with: { doctor: true }
                 },
                 dailyVisits: true,
             },
             orderBy: [desc(patients.createdAt)],
         });
-        return allPatients.map(p => {
+
+        const processedPatients = allPatientsData.map(p => {
             const latestRecord = p.dentalRecords && p.dentalRecords.length > 0 ? p.dentalRecords[0] : null;
+            const { dentalRecords, ...patientData } = p;
             return {
-                ...p,
+                ...patientData,
                 latestTreatmentDone: latestRecord?.treatmentDone,
                 latestTreatmentPlan: latestRecord?.treatmentPlan,
-                latestProvisionalDiagnosis: latestRecord?.provisionalDiagnosis
+                latestProvisionalDiagnosis: latestRecord?.provisionalDiagnosis,
+                doctorName: latestRecord?.doctor?.username
             };
         });
+
+        const shouldSeeContact = canUserSeeContactDetails(user, settings);
+        if (shouldSeeContact) {
+            return processedPatients;
+        }
+        
+        return processedPatients.map(p => stripContactInfo(p));
     }
 
-    async getPatientById(patientId: number) {
-        return await db.query.patients.findFirst({
+    async getPatientById(patientId: number, user?: AuthenticatedUser, settings?: any) {
+        const patient = await db.query.patients.findFirst({
             where: eq(patients.id, patientId),
             with: {
                 familyHead: true,
@@ -249,7 +330,26 @@ export class PatientService {
                 dentalRecords: { orderBy: [desc(dentalRecords.createdAt)] },
             },
         });
+
+        if (!patient) {
+            return null;
+        }
+
+        const shouldSeeContact = canUserSeeContactDetails(user, settings);
+        return shouldSeeContact ? patient : stripContactInfo(patient);
     }
+    
+    /**
+     * FOR INTERNAL USE: Fetches a patient's full record, including contact info,
+     * without applying permission-based stripping.
+     * @param patientId The ID of the patient to fetch.
+     * @returns The full patient object or null if not found.
+     */
+    async _getPatientWithContactInfoForInternalUse(patientId: number): Promise<PatientSelect | null> {
+        const [patient] = await db.select().from(patients).where(eq(patients.id, patientId)).limit(1);
+        return patient || null;
+    }
+
 
     async updatePatient(patientId: number, patientData: Partial<PatientInsert>) {
         const [existingPatient] = await db.select().from(patients).where(eq(patients.id, patientId)).limit(1);
@@ -329,7 +429,7 @@ export class PatientService {
     }
 
     async sendAppointmentReminder(patientId: number) {
-        const patient = await this.getPatientById(patientId);
+        const patient = await this._getPatientWithContactInfoForInternalUse(patientId);
         if (!patient) { return { success: false, message: "Patient not found." }; }
         if (!patient.email) { return { success: false, message: "Patient does not have an email address." }; }
         if (!patient.nextAppointmentDate) { return { success: false, message: "Patient does not have a next appointment date." }; }
@@ -344,6 +444,47 @@ export class PatientService {
             return { success: true, message: `Reminder sent to ${patient.name}.` };
         } catch (error: any) {
             console.error(`Error sending appointment reminder: ${error.message}`);
+            return { success: false, message: `Failed to send reminder. ${error.message}` };
+        }
+    }
+
+    /**
+     * NEW: Sends a procedure-specific reminder email to a patient.
+     * @param patientId The ID of the patient.
+     * @param reminderType The type of reminder to send ('scaling', 'extraction', 'rootCanal').
+     * @returns A result object indicating success or failure.
+     */
+    async sendProcedureSpecificReminder(patientId: number, reminderType: string) {
+        const patient = await this._getPatientWithContactInfoForInternalUse(patientId);
+        if (!patient) { return { success: false, message: "Patient not found." }; }
+        if (!patient.email) { return { success: false, message: "Patient does not have an email address." }; }
+
+        try {
+            const staffBccRecipients = await (emailService as any)._getOwnerAndStaffEmails();
+            let result;
+
+            switch (reminderType) {
+                case 'scaling':
+                    result = await emailService.sendScalingReminder(patient.email, { patientName: patient.name }, staffBccRecipients);
+                    break;
+                case 'extraction':
+                    if (!patient.nextAppointmentDate) { return { success: false, message: "Patient does not have a next appointment date for the extraction review." }; }
+                    result = await emailService.sendExtractionReminder(patient.email, { patientName: patient.name, appointmentDate: patient.nextAppointmentDate.toISOString() }, staffBccRecipients);
+                    break;
+                case 'rootCanal':
+                    result = await emailService.sendRootCanalReminder(patient.email, { patientName: patient.name }, staffBccRecipients);
+                    break;
+                default:
+                    return { success: false, message: "Invalid reminder type specified." };
+            }
+
+            if (result.success) {
+                return { success: true, message: `Specific reminder for '${reminderType}' sent to ${patient.name}.` };
+            } else {
+                throw new Error('Email transporter failed to send the email.');
+            }
+        } catch (error: any) {
+            console.error(`Error sending specific reminder '${reminderType}': ${error.message}`);
             return { success: false, message: `Failed to send reminder. ${error.message}` };
         }
     }
@@ -429,7 +570,11 @@ export class PatientService {
         if (!recordExists) { return { success: false, message: 'Dental record not found.' }; }
         const cleanedUpdateData: Partial<DentalRecordInsert> = { ...updateData };
         delete cleanedUpdateData.patientId;
-        delete cleanedUpdateData.doctorId;
+        
+        if (cleanedUpdateData.doctorId && !updateData.receptionistId) {
+            delete cleanedUpdateData.doctorId;
+        }
+
         await db.update(dentalRecords).set({ ...cleanedUpdateData, updatedAt: new Date() }).where(eq(dentalRecords.id, recordId));
         return { success: true, message: 'Dental record updated successfully.' };
     }
@@ -440,6 +585,108 @@ export class PatientService {
         await db.delete(dentalRecords).where(eq(dentalRecords.id, recordId));
         return { success: true, message: 'Dental record deleted successfully.' };
     }
+
+    async getPatientsForDoctor(doctorId: number) {
+        const patientRecords = await db
+            .select({
+                patientId: patients.id,
+                patientName: patients.name,
+                provisionalDiagnosis: dentalRecords.provisionalDiagnosis,
+                treatmentPlan: dentalRecords.treatmentPlan,
+                doctorId: dentalRecords.doctorId,
+                doctorName: users.username,
+                dentalRecordId: dentalRecords.id
+            })
+            .from(patients)
+            .leftJoin(dentalRecords, eq(patients.id, dentalRecords.patientId))
+            .leftJoin(users, eq(dentalRecords.doctorId, users.id))
+            .where(eq(dentalRecords.doctorId, doctorId))
+            .orderBy(desc(dentalRecords.createdAt));
+
+        type PatientRecord = {
+            patientId: number;
+            patientName: string;
+            provisionalDiagnosis: string | null;
+            treatmentPlan: string | null;
+            doctorId: number | null;
+            doctorName: string | null;
+            dentalRecordId: number | null;
+        };
+        const uniquePatients = patientRecords.reduce((acc: PatientRecord[], current) => {
+            if (!acc.find(item => item.patientId === current.patientId)) {
+                acc.push(current as PatientRecord);
+            }
+            return acc;
+        }, [] as PatientRecord[]);
+
+        return uniquePatients;
+    }
+
+     async getAllPatientsForScheduling() {
+        const patientRecords = await db
+            .select({
+                patientId: patients.id,
+                patientName: patients.name,
+                provisionalDiagnosis: dentalRecords.provisionalDiagnosis,
+                treatmentPlan: dentalRecords.treatmentPlan,
+                doctorId: dentalRecords.doctorId,
+                doctorName: users.username,
+                dentalRecordId: dentalRecords.id,
+                nextAppointmentDate: patients.nextAppointmentDate,
+                createdAt: patients.createdAt
+            })
+            .from(patients)
+            .leftJoin(dentalRecords, eq(patients.id, dentalRecords.patientId))
+            .leftJoin(users, eq(dentalRecords.doctorId, users.id))
+            .orderBy(desc(dentalRecords.createdAt));
+
+        type PatientRecord = {
+            patientId: number;
+            patientName: string;
+            provisionalDiagnosis: string | null;
+            treatmentPlan: string | null;
+            doctorId: number | null;
+            doctorName: string | null;
+            dentalRecordId: number | null;
+            nextAppointmentDate: Date | null;
+            createdAt: Date;
+        };
+        const mappedRecords: PatientRecord[] = patientRecords.map(rec => ({
+            patientId: rec.patientId,
+            patientName: rec.patientName,
+            provisionalDiagnosis: rec.provisionalDiagnosis as string | null,
+            treatmentPlan: rec.treatmentPlan as string | null,
+            doctorId: rec.doctorId as number | null,
+            doctorName: rec.doctorName as string | null,
+            dentalRecordId: rec.dentalRecordId as number | null,
+            nextAppointmentDate: rec.nextAppointmentDate,
+            createdAt: rec.createdAt,
+        }));
+
+        const uniquePatients = mappedRecords.reduce((acc: PatientRecord[], current: PatientRecord) => {
+            if (!acc.find(item => item.patientId === current.patientId)) {
+                acc.push(current);
+            }
+            return acc;
+        }, [] as PatientRecord[]);
+        
+        return uniquePatients;
+    }
+
+    async assignDoctorToPatient(patientId: number, doctorId: number, receptionistId: number) {
+        const [latestRecord] = await db.select().from(dentalRecords)
+            .where(eq(dentalRecords.patientId, patientId))
+            .orderBy(desc(dentalRecords.createdAt))
+            .limit(1);
+
+        if (latestRecord) {
+            await db.update(dentalRecords).set({ doctorId, receptionistId }).where(eq(dentalRecords.id, latestRecord.id));
+        } else {
+            await db.insert(dentalRecords).values({ patientId, doctorId, receptionistId });
+        }
+        return { success: true, message: 'Doctor assigned successfully.' };
+    }
+
 
     private async _sendNewPatientNotifications(newPatient: PatientSelect) {
         try {
