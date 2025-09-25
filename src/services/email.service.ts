@@ -176,7 +176,7 @@ export class EmailService {
         console.log("[EmailService Debug] invoiceData received (before processing):", invoiceData); // Debug log for incoming data
 
         const template = await this.compileTemplate('invoice.html'); // Use compileTemplate
-        const subject = `Invoice from SWC Dental Clinic`;
+        const subject = `Invoice from Smile With Celebrity Dental Clinic`;
 
         const servicesForTemplate = Array.isArray(invoiceData.items) ? invoiceData.items.map((item: any) => {
             const calculatedTotalPrice = parseFloat(item.totalPrice || 0);
@@ -222,7 +222,7 @@ export class EmailService {
     
     async sendReceiptEmail(patientEmail: string, receiptData: any, senderUserId: number) {
         const template = await this.compileTemplate('receipt.html');
-        const subject = `Payment Receipt from SWC Dental Clinic - #${receiptData.receiptNumber}`;
+        const subject = `Payment Receipt from Smile With Celebrity Dental Clinic - #${receiptData.receiptNumber}`;
 
         const itemsForReceiptTemplate = Array.isArray(receiptData.items) ? receiptData.items.map((item: any) => ({
             description: item.description,
