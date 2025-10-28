@@ -24,6 +24,11 @@ interface NewFamilyHeadData {
     phoneNumber: string;
     email?: string | null;
     address?: string | null;
+    // --- NEW FIELDS ADDED ---
+    maritalStatus?: string | null;
+    occupation?: string | null;
+    religion?: string | null;
+    // --- END NEW FIELDS ---
     hmo?: { name: string; status?: string } | null;
 }
 
@@ -73,6 +78,8 @@ const canUserSeeContactDetails = (user: AuthenticatedUser | undefined, settings:
  */
 const stripContactInfo = (patient: any): any | null => {
     if (!patient) return null;
+    // UPDATED: Also strip maritalStatus, occupation, religion if needed (though they aren't contact info)
+    // For now, only stripping contact info as per function name.
     const { phoneNumber, email, address, ...safePatientData } = patient;
     const safePatient: any = { ...safePatientData };
 
@@ -96,11 +103,14 @@ export class PatientService {
   
   // ... (addGuestPatient, addFamilyMember, etc. - all other methods remain the same) ...
   async addGuestPatient(patientData: NewFamilyHeadData, sendReceipt: boolean = true): Promise<PatientSelect> {
-        const { name, sex, dateOfBirth, phoneNumber, email, address, hmo } = patientData;
+        // UPDATED: Destructure new fields
+        const { name, sex, dateOfBirth, phoneNumber, email, address, hmo, maritalStatus, occupation, religion } = patientData;
+        
         const existingPatient = await db.select().from(patients).where(eq(patients.phoneNumber, phoneNumber)).limit(1);
         if (existingPatient.length > 0) {
             throw new Error('A patient with this phone number already exists.');
         }
+        
         const [inserted] = await db.insert(patients).values({
             name,
             sex,
@@ -108,12 +118,18 @@ export class PatientService {
             phoneNumber,
             email: email || null,
             address: address || null,
+            // --- NEW FIELDS ADDED ---
+            maritalStatus: maritalStatus || null,
+            occupation: occupation || null,
+            religion: religion || null,
+            // --- END NEW FIELDS ---
             hmo: hmo || null,
             isFamilyHead: true,
             familyId: null,
             createdAt: new Date(),
             updatedAt: new Date(),
         });
+
         const [newPatient] = await db.query.patients.findMany({ where: eq(patients.id, inserted.insertId), limit: 1 });
         if (!newPatient) {
             throw new Error('Failed to retrieve newly created patient.');
@@ -165,8 +181,14 @@ export class PatientService {
         const { name, sex, dateOfBirth } = memberData;
         const [inserted] = await db.insert(patients).values({
             name, sex, dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null,
-            familyId: headId, isFamilyHead: false, hmo: familyHead.hmo,
+            familyId: headId, isFamilyHead: false, 
+            // UPDATED: Inherit new fields from family head
+            hmo: familyHead.hmo,
             address: familyHead.address,
+            maritalStatus: familyHead.maritalStatus,
+            occupation: null, // Occupation is usually individual
+            religion: familyHead.religion,
+            // ---
             phoneNumber: null, email: null, createdAt: new Date(), updatedAt: new Date(),
         });
         const [newMember] = await db.query.patients.findMany({ where: eq(patients.id, inserted.insertId), limit: 1 });
@@ -179,7 +201,9 @@ export class PatientService {
 
     async addGuestFamilyPatient(familyData: NewGuestFamilyData) {
         const { members, ...headData } = familyData;
-        const familyHead = await this.addGuestPatient(headData, false);
+        // headData now implicitly contains maritalStatus, occupation, religion
+        const familyHead = await this.addGuestPatient(headData, false); 
+        
         if (members && members.length > 0) {
             for (const memberData of members) {
                 await this.addFamilyMember(familyHead.id, memberData);
@@ -264,7 +288,12 @@ export class PatientService {
                 nextAppointmentDate: patients.nextAppointmentDate,
                 phoneNumber: patients.phoneNumber,
                 email: patients.email,
-                address: patients.address
+                address: patients.address,
+                // --- NEW FIELDS ADDED ---
+                maritalStatus: patients.maritalStatus,
+                occupation: patients.occupation,
+                religion: patients.religion,
+                // --- END NEW FIELDS ---
             }
         })
         .from(dailyVisits)
@@ -370,10 +399,12 @@ export class PatientService {
             }
         }
         
+        // patientData now implicitly contains maritalStatus, occupation, religion from the controller
         await db.update(patients).set({ ...patientData, updatedAt: new Date() }).where(eq(patients.id, patientId));
         
         if (existingPatient.isFamilyHead) {
-            const memberUpdateData: { hmo?: any; address?: any; updatedAt?: Date } = {};
+            // UPDATED: Propagate address, hmo, and religion to family members
+            const memberUpdateData: { hmo?: any; address?: any; religion?: any; updatedAt?: Date } = {};
             let shouldUpdateMembers = false;
 
             if (patientData.hmo !== undefined) {
@@ -384,6 +415,12 @@ export class PatientService {
                 memberUpdateData.address = patientData.address;
                 shouldUpdateMembers = true;
             }
+            // --- NEW FIELD ADDED ---
+            if (patientData.religion !== undefined) {
+                memberUpdateData.religion = patientData.religion;
+                shouldUpdateMembers = true;
+            }
+            // --- END NEW FIELD ---
 
             if (shouldUpdateMembers) {
                 memberUpdateData.updatedAt = new Date();
@@ -711,6 +748,8 @@ export class PatientService {
                 const dobFormatted = newPatient.dateOfBirth ? new Date(newPatient.dateOfBirth).toLocaleDateString() : 'N/A';
                 const registrationDateFormatted = newPatient.createdAt ? new Date(newPatient.createdAt).toLocaleDateString() : 'N/A';
                 const hmoName = newPatient.hmo && typeof newPatient.hmo === 'object' && (newPatient.hmo as { name?: string }).name ? (newPatient.hmo as { name?: string }).name : 'N/A';
+                
+                // UPDATED: Add new fields to email
                 const htmlContent = `
                     <h2>New Patient Registered!</h2>
                     <p>A new primary patient has been registered with the following details:</p>
@@ -722,6 +761,9 @@ export class PatientService {
                         <li><strong>Email:</strong> ${newPatient.email || 'N/A'}</li>
                         <li><strong>Address:</strong> ${newPatient.address || 'N/A'}</li>
                         <li><strong>HMO:</strong> ${hmoName}</li>
+                        <li><strong>Marital Status:</strong> ${newPatient.maritalStatus || 'N/A'}</li>
+                        <li><strong>Occupation:</strong> ${newPatient.occupation || 'N/A'}</li>
+                        <li><strong>Religion:</strong> ${newPatient.religion || 'N/A'}</li>
                         <li><strong>Registration Date:</strong> ${registrationDateFormatted}</li>
                     </ul>`;
                 await emailService.sendEmail(allRecipients.join(','), subject, htmlContent);
@@ -756,6 +798,8 @@ export class PatientService {
                 const registrationDateFormatted = patient.createdAt ? new Date(patient.createdAt).toLocaleDateString() : 'N/A';
                 const hmoName = patient.hmo && typeof patient.hmo === 'object' && (patient.hmo as { name?: string }).name ? (patient.hmo as { name?: string }).name : 'N/A';
                 const visitDateFormatted = visitDate.toLocaleDateString();
+                
+                // UPDATED: Add new fields to email
                 const htmlContent = `
                     <h2>Returning Patient Checked In!</h2>
                     <p><strong>${patient.name}</strong> has checked in on <strong>${visitDateFormatted}</strong>.</p>
@@ -768,6 +812,9 @@ export class PatientService {
                         <li><strong>Email:</strong> ${patient.email || 'N/A'}</li>
                         <li><strong>Address:</strong> ${patient.address || 'N/A'}</li>
                         <li><strong>HMO:</strong> ${hmoName}</li>
+                        <li><strong>Marital Status:</strong> ${patient.maritalStatus || 'N/A'}</li>
+                        <li><strong>Occupation:</strong> ${patient.occupation || 'N/A'}</li>
+                        <li><strong>Religion:</strong> ${patient.religion || 'N/A'}</li>
                         <li><strong>Initial Registration Date:</strong> ${registrationDateFormatted}</li>
                     </ul>`;
                 await emailService.sendEmail(allRecipients.join(','), subject, htmlContent);

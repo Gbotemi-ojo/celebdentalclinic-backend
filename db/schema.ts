@@ -12,7 +12,12 @@ export const patients = mysqlTable("patients", {
     dateOfBirth: timestamp("date_of_birth", { mode: 'date' }),
     phoneNumber: varchar("phone_number", { length: 20 }).unique(),
     email: varchar("email", { length: 255 }).unique(),
-    address: text("address"), // UPDATED: Added patient address field
+    address: text("address"),
+    // --- NEW FIELDS ADDED ---
+    maritalStatus: varchar("marital_status", { length: 50 }),
+    occupation: varchar("occupation", { length: 255 }),
+    religion: varchar("religion", { length: 100 }),
+    // --- END NEW FIELDS ---
     hmo: json("hmo"),
     nextAppointmentDate: timestamp("next_appointment_date", { mode: 'date' }),
     outstanding: decimal("outstanding", { precision: 10, scale: 2 }).default('0.00').notNull(),

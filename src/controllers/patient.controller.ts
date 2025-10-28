@@ -17,7 +17,9 @@ export class PatientController {
 
   // ... (submitGuestPatient, submitGuestFamilyPatient, addFamilyMember, recordReturningGuestVisit methods are unchanged) ...
   submitGuestPatient = async (req: Request, res: Response): Promise<void> => {
-    const { name, sex, dateOfBirth, phoneNumber, email, address, hmo } = req.body; // UPDATED: Destructured address
+    // UPDATED: Destructured new fields
+    const { name, sex, dateOfBirth, phoneNumber, email, address, hmo, maritalStatus, occupation, religion } = req.body; 
+    
     if (!name || !sex || !phoneNumber) {
       res.status(400).json({ error: 'Name, sex, and phone number are required for a primary patient.' });
       return;
@@ -27,7 +29,8 @@ export class PatientController {
       return;
     }
     try {
-      const newPatient = await patientService.addGuestPatient({ name, sex, dateOfBirth, phoneNumber, email, address, hmo }); // UPDATED: Passed address
+      // UPDATED: Passed new fields to the service
+      const newPatient = await patientService.addGuestPatient({ name, sex, dateOfBirth, phoneNumber, email, address, hmo, maritalStatus, occupation, religion }); 
       res.status(201).json({ message: 'Patient information submitted successfully.', patient: newPatient });
     } catch (error: any) {
       console.error('Error submitting guest patient info:', error);
@@ -40,6 +43,8 @@ export class PatientController {
   };
 
   submitGuestFamilyPatient = async (req: Request, res: Response): Promise<void> => {
+    // NO CHANGE NEEDED HERE. 
+    // req.body contains the new fields, and '...headData' in the service will pick them up.
     const { members, ...headData } = req.body;
     const { name, sex, phoneNumber, email } = headData;
     if (!name || !sex || !phoneNumber) {
@@ -61,7 +66,7 @@ export class PatientController {
         }
     }
     try {
-        const newFamily = await patientService.addGuestFamilyPatient(req.body);
+        const newFamily = await patientService.addGuestFamilyPatient(req.body); // req.body is correctly passed
         res.status(201).json({ message: 'Family patient information submitted successfully.', family: newFamily });
     } catch (error: any) {
         console.error('Error submitting guest family patient info:', error);
@@ -90,7 +95,7 @@ export class PatientController {
     } catch (error: any) {
       console.error('Error adding family member:', error);
       if (error.message.includes('not found')) {
-        res.status(404).json({ error: error.message });
+        res.status(44).json({ error: error.message });
       } else {
         res.status(500).json({ error: 'Server error adding family member.' });
       }
@@ -167,7 +172,9 @@ export class PatientController {
   // ... (updatePatient and other methods are unchanged) ...
   updatePatient = async (req: Request, res: Response): Promise<void> => {
     const patientId = parseInt(req.params.id);
-    const { name, sex, dateOfBirth, phoneNumber, email, address, hmo } = req.body; // UPDATED: Destructured address
+    // UPDATED: Destructured new fields
+    const { name, sex, dateOfBirth, phoneNumber, email, address, hmo, maritalStatus, occupation, religion } = req.body; 
+    
     if (isNaN(patientId)) {
       res.status(400).json({ error: 'Invalid patient ID.' });
       return;
@@ -181,10 +188,16 @@ export class PatientController {
         return;
     }
     try {
-      // UPDATED: Added address to update payload
-      const updateData: Partial<InferInsertModel<typeof patients>> = { name, sex, dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null, phoneNumber, email, address, hmo };
+      // UPDATED: Added new fields to update payload
+      const updateData: Partial<InferInsertModel<typeof patients>> = { 
+        name, sex, dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null, 
+        phoneNumber, email, address, hmo, 
+        maritalStatus, occupation, religion 
+      };
       Object.keys(updateData).forEach(key => updateData[key as keyof typeof updateData] === undefined && delete updateData[key as keyof typeof updateData]);
+      
       const result = await patientService.updatePatient(patientId, updateData);
+      
       if (!result.success) {
         res.status(result.message.includes('not found') ? 404 : 409).json({ error: result.message });
         return;
