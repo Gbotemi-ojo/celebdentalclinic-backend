@@ -377,6 +377,39 @@ export class PatientController {
     }
   }
 
+  updateDentalRecordDate = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const recordId = parseInt(req.params.id);
+    const { newDate } = req.body;
+
+    if (isNaN(recordId)) {
+      res.status(400).json({ error: 'Invalid record ID.' });
+      return;
+    }
+
+    if (!newDate) {
+      res.status(400).json({ error: 'The newDate field is required.' });
+      return;
+    }
+
+    const parsedDate = new Date(newDate);
+    if (isNaN(parsedDate.getTime())) {
+      res.status(400).json({ error: 'Invalid date format provided.' });
+      return;
+    }
+
+    try {
+      const result = await patientService.updateDentalRecordDate(recordId, parsedDate);
+      if (!result.success) {
+        res.status(404).json({ error: result.message });
+        return;
+      }
+      res.json({ message: 'Dental record date updated successfully.' });
+    } catch (error) {
+      console.error('Error in updateDentalRecordDate controller:', error);
+      res.status(500).json({ error: 'Server error updating dental record date.' });
+    }
+  }
+
   deleteDentalRecord = async (req: Request, res: Response): Promise<void> => {
     const recordId = parseInt(req.params.id);
     if (isNaN(recordId)) {

@@ -115,6 +115,9 @@ router.get('/dental-records/:id', authenticateToken, authorizeRoles(['owner', 's
 // PUT /dental-records/:id - Update a dental record by its own ID.
 router.put('/dental-records/:id', authenticateToken, authorizeRoles(['owner', 'staff', 'nurse', 'doctor']), patientController.updateDentalRecord);
 
+// PUT /dental-records/:id/date - Update the creation date of a dental record.
+router.put('/dental-records/:id/date', authenticateToken, authorizeRoles(['owner', 'staff', 'nurse', 'doctor']), patientController.updateDentalRecordDate);
+
 // DELETE /dental-records/:id - Delete a dental record by its own ID.
 router.delete('/dental-records/:id', authenticateToken, authorizeRoles(['owner', 'staff', 'nurse', 'doctor']), patientController.deleteDentalRecord);
 

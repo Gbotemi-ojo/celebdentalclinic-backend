@@ -616,6 +616,23 @@ export class PatientService {
         return { success: true, message: 'Dental record updated successfully.' };
     }
 
+    async updateDentalRecordDate(recordId: number, newDate: Date) {
+        const [recordExists] = await db.select().from(dentalRecords).where(eq(dentalRecords.id, recordId)).limit(1);
+        
+        if (!recordExists) { 
+            return { success: false, message: 'Dental record not found.' }; 
+        }
+
+        await db.update(dentalRecords)
+            .set({ 
+                createdAt: newDate, 
+                updatedAt: new Date() 
+            })
+            .where(eq(dentalRecords.id, recordId));
+            
+        return { success: true, message: 'Dental record date updated successfully.' };
+    }
+
     async deleteDentalRecord(recordId: number) {
         const [recordExists] = await db.select().from(dentalRecords).where(eq(dentalRecords.id, recordId)).limit(1);
         if (!recordExists) { return { success: false, message: 'Dental record not found.' }; }
