@@ -1,8 +1,8 @@
 // src/controllers/user.controller.ts
 import { Request, Response } from 'express';
 import { userService } from '../services/user.service';
+import { safeInt } from '../utils/helpers'; // Import safeInt
 
-// Extend the Request type to include the user property from your middleware
 interface AuthenticatedRequest extends Request {
   user?: {
     userId: number;
@@ -81,7 +81,7 @@ export class UserController {
   };
 
   getUserById = async (req: Request, res: Response): Promise<void> => {
-    const userId = parseInt(req.params.id);
+    const userId = safeInt(req.params.id); // Updated to use safeInt
     if (isNaN(userId)) {
       res.status(400).json({ error: 'Invalid user ID.' });
       return;
@@ -101,7 +101,7 @@ export class UserController {
   };
 
   updateUser = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    const userId = parseInt(req.params.id);
+    const userId = safeInt(req.params.id); // Updated to use safeInt
     const updateData = req.body;
     const currentLoggedInUserId = req.user!.userId;
 
@@ -120,7 +120,7 @@ export class UserController {
   };
 
   updateUserStatus = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    const userId = parseInt(req.params.id);
+    const userId = safeInt(req.params.id); // Updated to use safeInt
     const { isActive } = req.body;
     const currentLoggedInUserId = req.user!.userId;
 
@@ -139,7 +139,7 @@ export class UserController {
   };
 
   deleteUser = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    const userId = parseInt(req.params.id);
+    const userId = safeInt(req.params.id); // Updated to use safeInt
     const currentLoggedInUserId = req.user!.userId;
 
     if (isNaN(userId)) {

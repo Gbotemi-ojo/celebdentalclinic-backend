@@ -21,3 +21,12 @@ export async function hashPassword(password: string): Promise<string> {
 export async function comparePasswords(password: string, hash: string): Promise<boolean> {
   return bcrypt.compare(password, hash);
 }
+
+/**
+ * This function swallows the type error by handling the array check manually.
+ */
+export const safeInt = (param: any): number => {
+  if (!param) return NaN;
+  const str = Array.isArray(param) ? param[0] : param;
+  return parseInt(String(str), 10);
+};
