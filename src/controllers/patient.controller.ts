@@ -1,7 +1,8 @@
 // src/controllers/patient.controller.ts
 import { Request, Response, NextFunction } from 'express';
 import { patientService } from '../services/patient.service';
-import { settingsService } from '../services/settings.service'; 
+import { settingsService } from '../services/settings.service';
+
 import { InferInsertModel } from 'drizzle-orm';
 import { patients, dentalRecords } from '../../db/schema';
 import { safeInt } from '../utils/helpers'; // Import safeInt
@@ -18,18 +19,20 @@ export class PatientController {
 
   submitGuestPatient = async (req: Request, res: Response): Promise<void> => {
     const { name, sex, dateOfBirth, phoneNumber, email, address, hmo, maritalStatus, occupation, religion } = req.body; 
-    
+          
     if (!name || !sex || !phoneNumber) {
       res.status(400).json({ error: 'Name, sex, and phone number are required for a primary patient.' });
       return;
     }
+
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       res.status(400).json({ error: 'Invalid email address format.' });
       return;
     }
+
     try {
       const newPatient = await patientService.addGuestPatient({ name, sex, dateOfBirth, phoneNumber, email, address, hmo, maritalStatus, occupation, religion }); 
-      res.status(201).json({ message: 'Patient information submitted successfully.', patient: newPatient });
+       res.status(201).json({ message: 'Patient information submitted successfully.', patient: newPatient });
     } catch (error: any) {
       console.error('Error submitting guest patient info:', error);
       if (error.message.includes('phone number already exists')) {
@@ -43,24 +46,29 @@ export class PatientController {
   submitGuestFamilyPatient = async (req: Request, res: Response): Promise<void> => {
     const { members, ...headData } = req.body;
     const { name, sex, phoneNumber, email } = headData;
+
     if (!name || !sex || !phoneNumber) {
       res.status(400).json({ error: 'Name, sex, and phone number are required for the family head.' });
       return;
     }
+
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       res.status(400).json({ error: 'Invalid email address format for the family head.' });
       return;
     }
+
     if (!Array.isArray(members) || members.length === 0) {
         res.status(400).json({ error: 'At least one family member must be provided in the "members" array.' });
         return;
     }
+
     for (const member of members) {
         if (!member.name || !member.sex) {
             res.status(400).json({ error: 'Each family member must have a name and sex.' });
             return;
         }
     }
+
     try {
         const newFamily = await patientService.addGuestFamilyPatient(req.body);
         res.status(201).json({ message: 'Family patient information submitted successfully.', family: newFamily });
@@ -77,14 +85,17 @@ export class PatientController {
   addFamilyMember = async (req: Request, res: Response): Promise<void> => {
     const headId = safeInt(req.params.headId); // Updated to use safeInt
     const { name, sex, dateOfBirth } = req.body;
+
     if (isNaN(headId)) {
       res.status(400).json({ error: 'Invalid family head ID.' });
       return;
     }
+
     if (!name || !sex) {
       res.status(400).json({ error: 'Name and sex are required for a family member.' });
       return;
     }
+
     try {
       const newMember = await patientService.addFamilyMember(headId, { name, sex, dateOfBirth });
       res.status(201).json({ message: 'Family member added successfully.', patient: newMember });
@@ -97,7 +108,7 @@ export class PatientController {
       }
     }
   };
-
+   
   recordReturningGuestVisit = async (req: Request, res: Response): Promise<void> => {
     const { identifier } = req.body;
     if (!identifier) {
@@ -116,7 +127,7 @@ export class PatientController {
       }
     }
   };
-      
+       
   getTodaysReturningPatients = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const settings = await settingsService.getSettings();
@@ -145,10 +156,11 @@ export class PatientController {
       res.status(400).json({ error: 'Invalid patient ID.' });
       return;
     }
+
     try {
       const settings = await settingsService.getSettings();
       const patient = await patientService.getPatientById(patientId, req.user, settings);
-      
+             
       if (!patient) {
         res.status(404).json({ error: 'Patient not found.' });
         return;
@@ -163,29 +175,32 @@ export class PatientController {
   updatePatient = async (req: Request, res: Response): Promise<void> => {
     const patientId = safeInt(req.params.id); // Updated to use safeInt
     const { name, sex, dateOfBirth, phoneNumber, email, address, hmo, maritalStatus, occupation, religion } = req.body; 
-    
+          
     if (isNaN(patientId)) {
       res.status(400).json({ error: 'Invalid patient ID.' });
       return;
     }
+
     if (!name || !sex) {
       res.status(400).json({ error: 'Name and sex are required.' });
       return;
     }
+
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
         res.status(400).json({ error: 'Invalid email address format.' });
         return;
     }
+
     try {
       const updateData: Partial<InferInsertModel<typeof patients>> = { 
-        name, sex, dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null, 
-        phoneNumber, email, address, hmo, 
-        maritalStatus, occupation, religion 
-      };
+         name, sex, dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null, 
+         phoneNumber, email, address, hmo,
+         maritalStatus, occupation, religion
+       };
       Object.keys(updateData).forEach(key => updateData[key as keyof typeof updateData] === undefined && delete updateData[key as keyof typeof updateData]);
-      
+             
       const result = await patientService.updatePatient(patientId, updateData);
-      
+             
       if (!result.success) {
         res.status(result.message.includes('not found') ? 404 : 409).json({ error: result.message });
         return;
@@ -200,14 +215,17 @@ export class PatientController {
   scheduleNextAppointment = async (req: Request, res: Response): Promise<void> => {
     const patientId = safeInt(req.params.patientId); // Updated to use safeInt
     const { interval } = req.body;
+
     if (isNaN(patientId)) {
       res.status(400).json({ error: 'Invalid patient ID.' });
       return;
     }
+
     if (!interval || typeof interval !== 'string') {
       res.status(400).json({ error: 'An interval string must be provided.' });
       return;
     }
+
     try {
       const result = await patientService.scheduleNextAppointment(patientId, interval);
       if (!result.success) {
@@ -228,6 +246,7 @@ export class PatientController {
         res.status(400).json({ error: 'Invalid patient ID.' });
         return;
     }
+
     try {
         const result = await patientService.sendAppointmentReminder(patientId);
         if (!result.success) {
@@ -244,12 +263,13 @@ export class PatientController {
 
   sendProcedureSpecificReminder = async (req: Request, res: Response): Promise<void> => {
     const patientId = safeInt(req.params.patientId); // Updated to use safeInt
-    const { type } = req.params;
+    const type = req.params.type as string; // FIX: Explicitly cast to string
 
     if (isNaN(patientId)) {
         res.status(400).json({ error: 'Invalid patient ID.' });
         return;
     }
+
     if (!type) {
         res.status(400).json({ error: 'Reminder type is required.' });
         return;
@@ -272,11 +292,14 @@ export class PatientController {
   createDentalRecord = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const patientId = safeInt(req.params.patientId); // Updated to use safeInt
     const doctorId = req.user!.userId;
+
     if (isNaN(patientId)) {
       res.status(400).json({ error: 'Invalid patient ID.' });
       return;
     }
+
     const recordData: Partial<InferInsertModel<typeof dentalRecords>> = req.body;
+
     try {
       const result = await patientService.createDentalRecord(patientId, doctorId, recordData);
       if (!result.success) {
@@ -292,10 +315,12 @@ export class PatientController {
 
   getDentalRecordsByPatientId = async (req: Request, res: Response): Promise<void> => {
     const patientId = safeInt(req.params.patientId); // Updated to use safeInt
+
     if (isNaN(patientId)) {
       res.status(400).json({ error: 'Invalid patient ID.' });
       return;
     }
+
     try {
       const records = await patientService.getDentalRecordsByPatientId(patientId);
       res.json(records);
@@ -308,10 +333,12 @@ export class PatientController {
   getSpecificDentalRecordForPatient = async (req: Request, res: Response): Promise<void> => {
     const patientId = safeInt(req.params.patientId); // Updated to use safeInt
     const recordId = safeInt(req.params.recordId);   // Updated to use safeInt
+
     if (isNaN(patientId) || isNaN(recordId)) {
       res.status(400).json({ error: 'Invalid patient ID or record ID.' });
       return;
     }
+
     try {
       const record = await patientService.getSpecificDentalRecordForPatient(patientId, recordId);
       if (!record) {
@@ -327,10 +354,12 @@ export class PatientController {
 
   getDentalRecordById = async (req: Request, res: Response): Promise<void> => {
     const recordId = safeInt(req.params.id); // Updated to use safeInt
+
     if (isNaN(recordId)) {
       res.status(400).json({ error: 'Invalid record ID.' });
       return;
     }
+
     try {
       const record = await patientService.getDentalRecordById(recordId);
       if (!record) {
@@ -346,13 +375,16 @@ export class PatientController {
 
   updateDentalRecord = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const recordId = safeInt(req.params.id); // Updated to use safeInt
+
     if (isNaN(recordId)) {
       res.status(400).json({ error: 'Invalid record ID.' });
       return;
     }
+
     try {
       const updateData: Partial<InferInsertModel<typeof dentalRecords>> = req.body;
       const result = await patientService.updateDentalRecord(recordId, updateData);
+
       if (!result.success) {
         res.status(404).json({ error: result.message });
         return;
@@ -399,10 +431,12 @@ export class PatientController {
 
   deleteDentalRecord = async (req: Request, res: Response): Promise<void> => {
     const recordId = safeInt(req.params.id); // Updated to use safeInt
+
     if (isNaN(recordId)) {
       res.status(400).json({ error: 'Invalid record ID.' });
       return;
     }
+
     try {
       const result = await patientService.deleteDentalRecord(recordId);
       if (!result.success) {
@@ -418,10 +452,12 @@ export class PatientController {
 
   getDoctorSchedule = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const doctorId = safeInt(req.params.doctorId); // Updated to use safeInt
+
     if (isNaN(doctorId)) {
         res.status(400).json({ error: 'Invalid doctor ID.' });
         return;
     }
+
     try {
         const patients = await patientService.getPatientsForDoctor(doctorId);
         res.json(patients);
@@ -450,6 +486,7 @@ export class PatientController {
         res.status(400).json({ error: 'Invalid patient ID or doctor ID.' });
         return;
     }
+
     try {
         const result = await patientService.assignDoctorToPatient(patientId, doctorId, receptionistId);
         if (!result.success) {
